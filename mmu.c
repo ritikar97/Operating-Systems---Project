@@ -3,10 +3,10 @@
 #include <stdint.h>
 
 #define PAGE_SIZE 4096
-#define NUM_FRAMES 100
+#define NUM_FRAMES 4
 #define PHYSICAL_MEMORY_SIZE (NUM_FRAMES * PAGE_SIZE)
-#define PROC_PAGES (500)
-
+#define PROC_PAGES (13)
+#define DEBUG
 
 #ifdef DEBUG
 #define LOG(...) printf(__VA_ARGS__)
@@ -17,52 +17,53 @@
 enum algorithm
 {
     FIFO = 0,
-    LRU, 
+    LRU,
     OPT
 };
+
+int firstIdx = 0;
 
 enum algorithm pra = FIFO;
 
 int page_faults = 0;
 
-int firstIdx = 0; // for FIFO algorithm
-
-typedef struct 
+typedef struct
 {
     int valid;
     int frame_number;
+    int last_accessed; // For LRU algorithm
 } PageTableEntry;
 
-typedef struct 
+typedef struct
 {
     PageTableEntry entries[PROC_PAGES];
 } PageTable;
 
-typedef struct 
+typedef struct
 {
     int pageNumber;
     int valid;
     uint8_t data[PAGE_SIZE];
-    // Additional data for the page
 } Page;
 
-typedef struct 
+typedef struct
 {
     Page frame[NUM_FRAMES];
 } PhysicalMemory;
 
-typedef struct 
+typedef struct
 {
     PageTable page_table;
     PhysicalMemory physical_memory;
 } MMU;
 
-void initializeMMU(MMU* mmu) 
+void initializeMMU(MMU *mmu)
 {
     // Initialize MMU and associated data structures
     for (int i = 0; i < PROC_PAGES; i++)
     {
         mmu->page_table.entries[i].valid = -1;
+        mmu->page_table.entries[i].last_accessed = 0; // Initialize last accessed time for LRU
     }
 
     for (int i = 0; i < NUM_FRAMES; i++)
@@ -72,7 +73,7 @@ void initializeMMU(MMU* mmu)
     }
 }
 
-int findFreeFrame(MMU* mmu)
+int findFreeFrame(MMU *mmu)
 {
     // Find the first free frame in physical memory
     for (int i = 0; i < NUM_FRAMES; i++)
@@ -85,7 +86,7 @@ int findFreeFrame(MMU* mmu)
     return -1; // No free frames available
 }
 
-void fifoPageReplacement(MMU* mmu, int pageNum)
+void fifoPageReplacement(MMU *mmu, int pageNum)
 {
     // Handle page fault and add the page to physical memory
     int freeFrame = findFreeFrame(mmu);
@@ -96,51 +97,84 @@ void fifoPageReplacement(MMU* mmu, int pageNum)
         mmu->page_table.entries[pageNum].frame_number = freeFrame;
         mmu->physical_memory.frame[freeFrame].pageNumber = pageNum;
         mmu->physical_memory.frame[freeFrame].valid = 1;
-
     }
     else
     {
         int pageNumDel = mmu->physical_memory.frame[firstIdx].pageNumber;
         LOG("Did not find a free frame for page number = %d, so replacing page = %d\n", pageNum, pageNumDel);
-        mmu -> page_table.entries[pageNumDel].valid = -1;
-        mmu -> page_table.entries[pageNum].frame_number = firstIdx;
+        mmu->page_table.entries[pageNumDel].valid = -1;
+        mmu->page_table.entries[pageNum].frame_number = firstIdx;
+        mmu->page_table.entries[pageNum].valid = 1;
         mmu->physical_memory.frame[firstIdx].pageNumber = pageNum;
-        firstIdx = (firstIdx) + 1;
-        firstIdx = firstIdx % NUM_FRAMES;
+        firstIdx = (firstIdx + 1) % NUM_FRAMES;
     }
 }
 
-
-void LRUPageReplacement()
-
-void addPage(MMU* mmu, int pageNum)
+void lruPageReplacement(MMU *mmu, int pageNum)
 {
-    if(pra == FIFO)
+    // Handle page fault and add the page to physical memory
+    int freeFrame = findFreeFrame(mmu);
+    if (freeFrame != -1)
+    {
+        LOG("Found a free frame for page number = %d, free frame = %d\n", pageNum, freeFrame);
+        mmu->page_table.entries[pageNum].valid = 1;
+        mmu->page_table.entries[pageNum].frame_number = freeFrame;
+        mmu->physical_memory.frame[freeFrame].pageNumber = pageNum;
+        mmu->physical_memory.frame[freeFrame].valid = 1;
+    }
+    else
+    {
+        // Find the least recently used frame
+        int lruFrame = 0;
+
+        for (int i = 1; i < NUM_FRAMES; i++)
+        {
+            if (mmu->page_table.entries[mmu->physical_memory.frame[i].pageNumber].last_accessed <
+                mmu->page_table.entries[mmu->physical_memory.frame[lruFrame].pageNumber].last_accessed)
+            {
+                lruFrame = i;
+            }
+        }
+
+        int pageNumDel = mmu->physical_memory.frame[lruFrame].pageNumber;
+        LOG("Did not find a free frame for page number = %d, so replacing page = %d\n", pageNum, pageNumDel);
+        mmu->page_table.entries[pageNumDel].valid = -1;
+        mmu->page_table.entries[pageNum].frame_number = lruFrame;
+        mmu->page_table.entries[pageNum].valid = 1;
+        mmu->physical_memory.frame[lruFrame].pageNumber = pageNum;
+        mmu->physical_memory.frame[lruFrame].valid = 1;
+    }
+}
+
+void addPage(MMU *mmu, int pageNum)
+{
+    if (pra == FIFO)
     {
         fifoPageReplacement(mmu, pageNum);
     }
-    else if(pra == LRU)
+    else if (pra == LRU)
     {
-        LRUPageReplacement(mmu, pageNum);
+        lruPageReplacement(mmu, pageNum);
     }
 }
 
-int main() 
+int main()
 {
     MMU mmu;
     int numPageFaults = 0;
     int numPageHits = 0;
     initializeMMU(&mmu);
-    int refString[PROC_PAGES];
+    int refString[PROC_PAGES];// = {7, 0, 1, 2, 0, 3, 0, 4, 2, 3, 0, 3, 2};
 
     for (int i = 0; i < PROC_PAGES; i++)
     {
         refString[i] = rand() % PROC_PAGES;
     }
 
+
     LOG("Reference string is:\n");
 
-    for(int i = 0; i < PROC_PAGES; i++)
+    for (int i = 0; i < PROC_PAGES; i++)
     {
         LOG("%d\t", refString[i]);
     }
@@ -150,6 +184,7 @@ int main()
     for (int i = 0; i < PROC_PAGES; i++)
     {
         int pageNum = refString[i];
+        mmu.page_table.entries[pageNum].last_accessed = i; // Update last accessed time for LRU
         if (mmu.page_table.entries[pageNum].valid == -1)
         {
             LOG("Page fault for %d\n", pageNum);
@@ -165,9 +200,9 @@ int main()
 
     LOG("Ultimately, what's there is:\n");
 
-    for(int i = 0; i < NUM_FRAMES; i++)
+    for (int i = 0; i < NUM_FRAMES; i++)
     {
-        LOG("%d\t",mmu.physical_memory.frame[i].pageNumber);
+        LOG("%d\t", mmu.physical_memory.frame[i].pageNumber);
     }
 
     LOG("\n");
