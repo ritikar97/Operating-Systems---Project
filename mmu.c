@@ -2,11 +2,11 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <limits.h>
+#include <time.h>
 
 #define PAGE_SIZE 4096
-#define NUM_FRAMES 4
-#define PHYSICAL_MEMORY_SIZE (NUM_FRAMES * PAGE_SIZE)
-#define PROC_PAGES (20)
+#define PROC_PAGES (1000000)
+#define NUM_FRAMES (100)
 // #define DEBUG
 
 #ifdef DEBUG
@@ -15,19 +15,24 @@
 #define LOG(...)
 #endif
 
+
+clock_t start, end;
+double cpu_time_used;
+
 enum algorithm
 {
     FIFO = 0,
     LRU,
     OPT,
-    HRPA
+    HPRA,
+    NUM_ELEMENTS
 };
 
 int firstIdx = 0;
 
-enum algorithm pra = LRU;
-
+int pra;
 int page_faults = 0;
+int *refString; //= (int*)malloc(sizeof(int) * PROC_PAGES);
 
 typedef struct
 {
@@ -55,7 +60,7 @@ typedef struct
 {
     int pageNumber;
     int valid;
-    uint8_t data[PAGE_SIZE];
+    uint8_t data[4]; // Should ideally be page size but we don't want to overload mem
 } Page;
 
 typedef struct
@@ -347,37 +352,35 @@ void addPage(MMU *mmu, int pageNum, int refString[], int currentIdx)
     {
         optPageReplacement(mmu, pageNum, refString, currentIdx);
     }
-    else if (pra == HRPA)
+    else if (pra == HPRA)
     {
         hpraPageReplacement(mmu, pageNum, refString, currentIdx);
     }
 }
 
-int main()
+void CheckAlgo()
 {
     MMU mmu;
     int numPageFaults = 0;
     int numPageHits = 0;
-    initializeMMU(&mmu);
-    int refString[PROC_PAGES]= {7, 0, 1, 2, 0, 3, 0, 4, 2, 3, 0, 3, 2, 1, 2, 0, 1, 7, 0, 1};
 
-    // for (int i = 0; i < PROC_PAGES; i++)
-    // {
-    //     refString[i] = rand() % PROC_PAGES;
-    // }
+    initializeMMU(&mmu);
 
     LOG("Reference string is:\n");
 
     for (int i = 0; i < PROC_PAGES; i++)
     {
-        LOG("%d\t", refString[i]);
+        // LOG("%d\t", refString[i]);
     }
 
     LOG("\n");
 
+    start = clock(); // Record the start time
+
     for (int i = 0; i < PROC_PAGES; i++)
     {
-        int pageNum = refString[i];
+        int pageNum = refString[i];\
+        printf("Failing for i = %d and pageNum = %d\n", i, pageNum);
         mmu.page_table.entries[pageNum].last_accessed = i;       // Update last accessed time for LRU
         mmu.page_table.entries[pageNum].future_access = -1;      // Reset future access time for OPT
         for (int j = i + 1; j < PROC_PAGES; j++)
@@ -400,11 +403,9 @@ int main()
             LOG("YAY: Page hit for %d\n", pageNum);
             numPageHits++;
         }
-
-        printf("Current frame is %d %d %d %d\n", mmu.physical_memory.frame[0].pageNumber, 
-            mmu.physical_memory.frame[1].pageNumber, mmu.physical_memory.frame[2].pageNumber, 
-            mmu.physical_memory.frame[3].pageNumber);
     }
+
+    end = clock(); // Record the end time
 
     LOG("Ultimately, what's there is:\n");
 
@@ -418,5 +419,81 @@ int main()
     printf("Page Faults: %d\n", numPageFaults);
     printf("Page Hits: %d\n", numPageHits);
 
+    cpu_time_used = ((double)(end - start)) / CLOCKS_PER_SEC;
+
+    printf("Execution time for Algorithm %d: %f seconds\n", pra, cpu_time_used);
+
+}
+
+
+
+
+int main()
+{
+    refString = (int*)malloc(sizeof(int) * PROC_PAGES);
+    // // Testing a basic reference string with different number of frames
+    // int refString[PROC_PAGES];//= {7, 0, 1, 2, 0, 3, 0, 4, 2, 3, 0, 3, 2, 1, 2, 0, 1, 7, 0, 1};
+
+    // int locSize = 5;
+    // int size = PROC_PAGES;
+    // for (int i = 0; i < size; i += locSize) 
+    // {
+    //     int basePage = rand() % PROC_PAGES;
+    //     for (int j = 0; j < locSize && i + j < size; j++) 
+    //     {
+    //         refString[i + j] = (basePage + j) % PROC_PAGES;
+    //     }
+    // }
+
+    // printf("The reference string is: ");
+
+    // for(int i = 0; i < PROC_PAGES; i++)
+    // {
+    //     printf("%d\t", refString[i]);
+    // }
+    // printf("\n");
+
+    // Open the trace file for reading
+    FILE *file = fopen("swim.trace", "r");
+    if (!file)
+    {
+        fprintf(stderr, "Error opening file.\n");
+        return 1;
+    }
+
+    // Read lines from the file and generate a reference string
+    
+    int i = 0;
+    char line[256]; // Adjust the buffer size as needed
+
+    while (i < PROC_PAGES && fgets(line, sizeof(line), file))
+    {
+        char address[9]; // Assuming addresses are 8 characters long
+        sscanf(line, "%s", address);
+        uint32_t hexAddress = strtol(address, NULL, 16);
+        refString[i++] = hexAddress / PAGE_SIZE;
+    }
+
+    fclose(file);
+
+    // Print the generated reference string
+    // printf("The reference string is: ");
+    // for (int j = 0; j < i; j++)
+    // {
+    //     printf("%d\t", refString[j]);
+    // }
+    // printf("\n");
+
+    for(i = 0; i < NUM_ELEMENTS; i++)
+    {
+        pra = i;
+        printf("-------------------------------------------------------------------------------------\n");
+        printf("Testing for Page Replacement Algorithm Number [%d]\n", i);
+        
+        CheckAlgo();
+        
+        printf("-------------------------------------------------------------------------------------\n");
+        
+    }
     return 0;
 }
